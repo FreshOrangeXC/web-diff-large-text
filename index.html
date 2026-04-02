@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>大文本 Diff 查看器（WASM）</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#1a1d23;--sur:#22262f;--bor:#3a3f4b;--acc:#4e8cff;--txt:#dde1ea;--muted:#7a8090}
+    html,body,#app{height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif;overflow:hidden}
+
+    .utb{position:fixed;top:0;left:0;right:0;height:48px;background:var(--sur);border-bottom:1px solid var(--bor);
+      display:flex;align-items:center;justify-content:center;gap:16px;z-index:100;padding:0 20px}
+    .cbtn{padding:7px 28px;font-size:14px;font-weight:600;background:var(--acc);color:#fff;border:none;border-radius:7px;cursor:pointer;transition:opacity .15s}
+    .cbtn:disabled{opacity:.35;cursor:default}
+    .cbtn:not(:disabled):hover{opacity:.85}
+    .uhint{font-size:12px;color:var(--muted)}
+    .uscreen{position:fixed;top:48px;left:0;right:0;bottom:0;display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}
+    .upanel{display:flex;flex-direction:column;gap:10px;min-height:0}
+    .plabel{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+    .dz{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+      border:2px dashed var(--bor);border-radius:10px;padding:24px;cursor:pointer;
+      transition:border-color .2s,background .2s;min-height:0}
+    .dz.over{border-color:var(--acc);background:rgba(78,140,255,.07)}
+    .dz.ok{border-color:#28a745;border-style:solid;background:rgba(40,167,69,.06)}
+    .dz svg{width:36px;height:36px;stroke:var(--muted);flex-shrink:0}
+    .dz p{font-size:13px;color:var(--muted);text-align:center}
+    .dz .hint{font-size:11px;color:var(--bor)}
+    .lname{font-size:12px;color:#28a745;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+
+    .tb{position:fixed;top:0;left:0;right:0;height:42px;background:var(--sur);border-bottom:1px solid var(--bor);
+      display:flex;align-items:center;padding:0 12px;gap:10px;z-index:100}
+    .tb button{padding:4px 12px;font-size:12px;background:transparent;border:1px solid var(--bor);
+      color:var(--txt);border-radius:5px;cursor:pointer;transition:background .15s}
+    .tb button:hover{background:var(--bor)}
+    .algsel{height:26px;background:var(--bg);border:1px solid var(--bor);border-radius:4px;
+      color:var(--txt);padding:0 6px;font-size:12px;outline:none}
+    .algsel:focus{border-color:var(--acc)}
+    .si{flex:0 0 190px;height:26px;background:var(--bg);border:1px solid var(--bor);border-radius:4px;
+      color:var(--txt);padding:0 8px;font-size:13px;outline:none}
+    .si:focus{border-color:var(--acc)}
+    .sinfo{font-size:11px;color:var(--muted);min-width:55px}
+    .stats{margin-left:auto;font-size:11px;color:var(--muted);display:flex;gap:12px;align-items:center;white-space:nowrap}
+    .sa{color:#28a745}.sd{color:#dc3545}.sc{color:#ffc107}
+
+    /* diff 区域整体布局：指示条 + 两列 */
+    .ds{position:fixed;top:42px;left:0;right:0;bottom:0;display:flex;}
+
+    /* 垂直缩略图指示条 */
+    .minimap{width:18px;flex-shrink:0;background:var(--bg);border-right:1px solid var(--bor);
+      position:relative;cursor:pointer;overflow:hidden;}
+    .minimap canvas{position:absolute;top:0;left:0;width:100%;height:100%;}
+    /* 视口指示框 */
+    .minimap-thumb{position:absolute;left:0;right:0;background:rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.20);pointer-events:none;border-radius:1px;}
+
+    /* 两列面板容器 */
+    .ds-panels{flex:1;display:grid;grid-template-columns:1fr 1fr;overflow:hidden;}
+
+    .dp{position:relative;overflow:hidden;border-right:1px solid var(--bor)}
+    .dp:last-child{border-right:none}
+    .ph{position:absolute;top:0;left:0;right:0;height:26px;background:var(--sur);
+      border-bottom:1px solid var(--bor);display:flex;align-items:center;padding:0 8px;
+      font-size:11px;color:var(--muted);z-index:10;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .ps{position:absolute;top:26px;left:0;right:0;bottom:0;overflow-y:scroll;overflow-x:hidden}
+    .ps::-webkit-scrollbar{width:6px}
+    .ps::-webkit-scrollbar-track{background:var(--bg)}
+    .ps::-webkit-scrollbar-thumb{background:var(--bor);border-radius:3px}
+    .ps::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+    .lov{position:fixed;inset:0;background:rgba(26,29,35,.88);display:flex;flex-direction:column;align-items:center;
+      justify-content:center;gap:16px;z-index:999;font-size:15px;color:var(--muted)}
+    .spin{width:26px;height:26px;border:3px solid var(--bor);border-top-color:var(--acc);
+      border-radius:50%;animation:spin .75s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .wasm-badge{position:fixed;bottom:10px;right:14px;font-size:10px;padding:2px 7px;
+      border-radius:4px;z-index:200;background:rgba(78,140,255,.15);border:1px solid var(--acc);color:var(--acc)}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import{createApp,defineComponent,ref,reactive,computed,onMounted,onUnmounted,watch,nextTick}
+  from"https://cdn.jsdelivr.net/npm/vue@3/dist/vue.esm-browser.prod.js";
+
+// ══════════════════════════════════════════════════════════
+// WASM 桥接层
+// ══════════════════════════════════════════════════════════
+const WASM_MODULE_URL = './pkg/large_text_diff.js';
+const WASM_BINARY_URL = './pkg/large_text_diff_bg.wasm';
+
+let wasmInit = null, wasmDiff = null, wasmReady = false;
+
+async function loadWasm() {
+  try {
+    const mod = await import(WASM_MODULE_URL);
+    wasmInit = mod.default ?? mod.init;
+    wasmDiff = mod.diff_lines;
+    await wasmInit(WASM_BINARY_URL);
+    wasmReady = true;
+    console.log('[WASM] 已就绪');
+  } catch (e) {
+    console.warn('[WASM] 加载失败，将回退到 JS 实现:', e);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// JS 回退：Myers diff
+// ══════════════════════════════════════════════════════════
+function jsDiff(aLines, bLines) {
+  const map = new Map(); let uid = 0;
+  const id = s => { let v = map.get(s); if (v === undefined) { v = uid++; map.set(s, v); } return v; };
+  const a = new Int32Array(aLines.length), b = new Int32Array(bLines.length);
+  for (let i = 0; i < aLines.length; i++) a[i] = id(aLines[i]);
+  for (let i = 0; i < bLines.length; i++) b[i] = id(bLines[i]);
+
+  const ops = [];
+  const stack = [{ a0: 0, a1: a.length, b0: 0, b1: b.length }];
+  while (stack.length) {
+    const { a0, a1, b0, b1 } = stack.pop();
+    const N = a1 - a0, M = b1 - b0;
+    if (N === 0 && M === 0) continue;
+    if (N === 0) { ops.push({ type: 'ins', aStart: a0, aEnd: a0, bStart: b0, bEnd: b1 }); continue; }
+    if (M === 0) { ops.push({ type: 'del', aStart: a0, aEnd: a1, bStart: b0, bEnd: b0 }); continue; }
+    let pre = 0;
+    while (pre < N && pre < M && a[a0 + pre] === b[b0 + pre]) pre++;
+    let suf = 0;
+    while (suf < N - pre && suf < M - pre && a[a1 - 1 - suf] === b[b1 - 1 - suf]) suf++;
+    const na0 = a0 + pre, na1 = a1 - suf, nb0 = b0 + pre, nb1 = b1 - suf;
+    const nn = na1 - na0, nm = nb1 - nb0;
+    if (pre > 0) ops.push({ type: 'eq', aStart: a0, aEnd: a0 + pre, bStart: b0, bEnd: b0 + pre });
+    if (nn === 0 && nm === 0) {}
+    else if (nn === 0) ops.push({ type: 'ins', aStart: na0, aEnd: na0, bStart: nb0, bEnd: nb1 });
+    else if (nm === 0) ops.push({ type: 'del', aStart: na0, aEnd: na1, bStart: nb0, bEnd: nb0 });
+    else {
+      const snake = findSnake(a, na0, na1, b, nb0, nb1);
+      if (!snake) {
+        ops.push({ type: 'del', aStart: na0, aEnd: na1, bStart: nb0, bEnd: nb0 });
+        ops.push({ type: 'ins', aStart: na1, aEnd: na1, bStart: nb0, bEnd: nb1 });
+      } else {
+        const [ax, ay, bx, by] = snake;
+        if (suf > 0) stack.push({ a0: a1 - suf, a1, b0: b1 - suf, b1 });
+        stack.push({ a0: bx, a1: na1, b0: by, b1: nb1 });
+        if (bx > ax) ops.push({ type: 'eq', aStart: ax, aEnd: bx, bStart: ay, bEnd: by });
+        stack.push({ a0: na0, a1: ax, b0: nb0, b1: ay });
+        continue;
+      }
+    }
+    if (suf > 0) ops.push({ type: 'eq', aStart: a1 - suf, aEnd: a1, bStart: b1 - suf, bEnd: b1 });
+  }
+  ops.sort((x, y) => x.aStart !== y.aStart ? x.aStart - y.aStart : x.bStart - y.bStart);
+  const merged = [];
+  for (const op of ops) {
+    const last = merged[merged.length - 1];
+    if (last && last.type === op.type && last.aEnd === op.aStart && last.bEnd === op.bStart) {
+      last.aEnd = op.aEnd; last.bEnd = op.bEnd;
+    } else merged.push({ ...op });
+  }
+  return merged;
+}
+
+function findSnake(a, a0, a1, b, b0, b1) {
+  const N = a1 - a0, M = b1 - b0, delta = N - M, odd = (delta & 1) !== 0;
+  const maxD = Math.ceil((N + M) / 2) + 1, off = maxD + 2, sz = 2 * maxD + 6;
+  const fwd = new Int32Array(sz), bwd = new Int32Array(sz);
+  fwd[1 + off] = 0; bwd[1 + off] = 0;
+  for (let d = 0; d <= maxD; d++) {
+    for (let k = -d; k <= d; k += 2) {
+      const ki = k + off;
+      let x = (k === -d || (k !== d && fwd[ki - 1] < fwd[ki + 1])) ? fwd[ki + 1] : fwd[ki - 1] + 1;
+      let y = x - k, sx = x, sy = y;
+      while (x < N && y < M && a[a0 + x] === b[b0 + y]) { x++; y++; }
+      fwd[ki] = x;
+      if (odd) { const bk = delta - k + off; if (bk >= 0 && bk < sz && fwd[ki] + bwd[bk] >= N) return [a0 + sx, b0 + sy, a0 + x, b0 + y]; }
+    }
+    for (let k = -d; k <= d; k += 2) {
+      const ki = k + off;
+      let x = (k === -d || (k !== d && bwd[ki - 1] < bwd[ki + 1])) ? bwd[ki + 1] : bwd[ki - 1] + 1;
+      let y = x - k, sx = x, sy = y;
+      while (x < N && y < M && a[a1 - x - 1] === b[b1 - y - 1]) { x++; y++; }
+      bwd[ki] = x;
+      if (!odd) { const fk = delta - k + off; if (fk >= 0 && fk < sz && bwd[ki] + fwd[fk] >= N) return [a0 + N - x, b0 + M - y, a0 + N - sx, b0 + M - sy]; }
+    }
+  }
+  return null;
+}
+
+async function runDiff(aLines, bLines, algorithm) {
+  if (wasmReady && wasmDiff) {
+    const beforeText = aLines.join('\n') + (aLines.length ? '\n' : '');
+    const afterText  = bLines.join('\n') + (bLines.length ? '\n' : '');
+    const json = wasmDiff(beforeText, afterText, algorithm);
+    const raw = JSON.parse(json);
+    return raw.map(op => ({
+      type: op.type === 'equal' ? 'eq' : op.type === 'delete' ? 'del' : 'ins',
+      aStart: op.before_start, aEnd: op.before_end,
+      bStart: op.after_start,  bEnd: op.after_end,
+    }));
+  }
+  return jsDiff(aLines, bLines);
+}
+
+// ══════════════════════════════════════════════════════════
+// buildSlots
+// ══════════════════════════════════════════════════════════
+function buildSlots(ops) {
+  const raw = [];
+  for (const op of ops) {
+    if (op.type === 'eq') {
+      const n = op.aEnd - op.aStart;
+      for (let i = 0; i < n; i++) raw.push({ type:'eq', aIdx:op.aStart+i, bIdx:op.bStart+i });
+    } else if (op.type === 'del') {
+      const n = op.aEnd - op.aStart;
+      for (let i = 0; i < n; i++) raw.push({ type:'del', aIdx:op.aStart+i, bIdx:-1 });
+    } else {
+      const n = op.bEnd - op.bStart;
+      for (let i = 0; i < n; i++) raw.push({ type:'ins', aIdx:-1, bIdx:op.bStart+i });
+    }
+  }
+  const slots = [];
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i].type === 'del') {
+      let j = i; while (j < raw.length && raw[j].type === 'del') j++;
+      if (j < raw.length && raw[j].type === 'ins') {
+        let k = j; while (k < raw.length && raw[k].type === 'ins') k++;
+        const dels = raw.slice(i, j), inss = raw.slice(j, k);
+        const paired = Math.min(dels.length, inss.length);
+        for (let p = 0; p < paired; p++) {
+          const di = slots.length;
+          slots.push({ type:'chg', aIdx:dels[p].aIdx, bIdx:-1,           pair:di+1 });
+          slots.push({ type:'chg', aIdx:-1,            bIdx:inss[p].bIdx, pair:di });
+        }
+        for (let p = paired; p < dels.length; p++) slots.push({...dels[p]});
+        for (let p = paired; p < inss.length; p++) slots.push({...inss[p]});
+        i = k;
+      } else {
+        while (i < j) slots.push({...raw[i++]});
+      }
+    } else {
+      slots.push({...raw[i++]});
+    }
+  }
+  return slots;
+}
+
+// ══════════════════════════════════════════════════════════
+// 常量 & 字符级 diff
+// ══════════════════════════════════════════════════════════
+const FONT='13px/20px "Cascadia Code","Fira Code",monospace';
+const FS=13, LH=20, LNW=56, PAD=6, OVER=10, MAXB=100*1024*1024;
+
+function charDiff(a, b) {
+  if (a.length + b.length > 8000) return null;
+  let A = a, B = b, swapped = false;
+  if (A.length > B.length) { [A, B] = [B, A]; swapped = true; }
+  const N = A.length, M = B.length, delta = M - N, off = N + 1, sz = N + M + 3;
+  const fp = new Int32Array(sz).fill(-1), path = new Int32Array(sz).fill(-1), nodes = [];
+  function snake(k, y) { let x = y - k; while (x < N && y < M && A[x] === B[y]) { x++; y++; } return y; }
+  function ext(k) {
+    const d = fp[k - 1 + off] + 1, r = fp[k + 1 + off]; let y, prev;
+    if (d > r) { y = snake(k, d); prev = path[k - 1 + off]; } else { y = snake(k, r); prev = path[k + 1 + off]; }
+    fp[k + off] = y; const ni = nodes.length; nodes.push({ x: y - k, y, prev }); path[k + off] = ni;
+  }
+  let p = -1;
+  do { p++; for (let k = -p; k < delta; k++) ext(k); for (let k = delta + p; k > delta; k--) ext(k); ext(delta); }
+  while (fp[delta + off] !== M);
+  const aM = new Uint8Array(N), bM = new Uint8Array(M);
+  let ni = path[delta + off], px = N, py = M;
+  while (ni !== -1) {
+    const nd = nodes[ni], nx = nd.x, ny = nd.y; let cx = px, cy = py;
+    while (cx > nx && cy > ny) { cx--; cy--; }
+    while (cx > nx) aM[--cx] = 1;
+    while (cy > ny) bM[--cy] = 1;
+    px = nx; py = ny; ni = nd.prev;
+  }
+  while (px > 0) aM[--px] = 1;
+  while (py > 0) bM[--py] = 1;
+  return swapped ? { aM: bM, bM: aM } : { aM, bM };
+}
+
+// ══════════════════════════════════════════════════════════
+// Canvas 渲染器
+// ══════════════════════════════════════════════════════════
+class Renderer {
+  constructor(side) {
+    this.side = side; this.cv = null; this.sc = null; this.spacer = null; this.ctx = null;
+    this.W = 0; this.H = 0; this.slots = []; this.aLines = []; this.bLines = [];
+    this.charCache = new Map(); this.matchSlots = new Set();
+  }
+  mount(canvas, scrollEl) {
+    this.cv = canvas; this.sc = scrollEl;
+    this.cv.style.cssText = 'position:sticky;top:0;left:0;display:block;';
+    scrollEl.innerHTML = ''; scrollEl.appendChild(canvas);
+    const sp = document.createElement('div'); sp.style.cssText = 'width:1px;pointer-events:none;';
+    this.spacer = sp; scrollEl.appendChild(sp); this.ctx = canvas.getContext('2d'); this._resize();
+  }
+  setData(slots, aLines, bLines) {
+    this.slots = slots; this.aLines = aLines; this.bLines = bLines;
+    this.charCache.clear(); this.spacer.style.height = (slots.length * LH) + 'px'; this._resize();
+  }
+  _resize() {
+    if (!this.sc) return; const dpr = window.devicePixelRatio || 1;
+    this.W = this.sc.clientWidth; this.H = this.sc.clientHeight;
+    if (!this.W || !this.H) return;
+    this.cv.width = Math.floor(this.W * dpr); this.cv.height = Math.floor(this.H * dpr);
+    this.cv.style.width = this.W + 'px'; this.cv.style.height = this.H + 'px';
+    this.ctx = this.cv.getContext('2d'); this.ctx.scale(dpr, dpr);
+  }
+  resize() { this._resize(); }
+  render(st) {
+    const { ctx, W, H, slots, aLines, bLines, side } = this;
+    if (!ctx || !W || !H) return;
+    ctx.clearRect(0, 0, W, H); if (!slots.length) return;
+    const first = Math.max(0, Math.floor(st / LH) - OVER);
+    const last = Math.min(slots.length - 1, first + Math.ceil(H / LH) + OVER * 2);
+    ctx.font = FONT;
+    for (let si = first; si <= last; si++) {
+      const s = slots[si], y = si * LH - st;
+      const idx = side === 'a' ? s.aIdx : s.bIdx;
+      const txt = idx >= 0 ? (side === 'a' ? aLines[idx] : bLines[idx]) ?? '' : null;
+      let bg = '';
+      if (s.type === 'ins') bg = side === 'b' ? 'rgba(40,167,69,.22)' : 'rgba(40,167,69,.06)';
+      else if (s.type === 'del') bg = side === 'a' ? 'rgba(220,53,69,.22)' : 'rgba(220,53,69,.06)';
+      else if (s.type === 'chg') bg = 'rgba(255,193,7,.15)';
+      if (bg) { ctx.fillStyle = bg; ctx.fillRect(0, y, W, LH); }
+      if (this.matchSlots.has(si)) { ctx.fillStyle = 'rgba(255,200,0,.30)'; ctx.fillRect(LNW, y, W - LNW, LH); }
+      ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(0, y, LNW, LH);
+      if (idx >= 0) { ctx.fillStyle = '#5a6070'; ctx.textAlign = 'right'; ctx.fillText(idx + 1, LNW - 6, y + FS + 2); }
+      ctx.textAlign = 'center';
+      if (s.type === 'ins' && side === 'b') { ctx.fillStyle = '#28a745'; ctx.fillText('+', LNW - 22, y + FS + 2); }
+      if (s.type === 'del' && side === 'a') { ctx.fillStyle = '#dc3545'; ctx.fillText('−', LNW - 22, y + FS + 2); }
+      if (s.type === 'chg') { ctx.fillStyle = '#ffc107'; ctx.fillText('~', LNW - 22, y + FS + 2); }
+      if (txt === null) { ctx.fillStyle = 'rgba(90,96,112,.20)'; ctx.fillRect(LNW, y + LH / 2, W - LNW, 1); continue; }
+      if (s.type === 'chg' && s.pair !== undefined) this._inlineDiff(ctx, si, s, txt, y);
+      else { ctx.fillStyle = '#dde1ea'; ctx.textAlign = 'left'; ctx.fillText(txt, LNW + PAD, y + FS + 2); }
+    }
+  }
+  _inlineDiff(ctx, si, slot, txt, y) {
+    if (!this.charCache.has(si)) {
+      const ps = this.slots[slot.pair];
+      const aT = slot.aIdx >= 0 ? this.aLines[slot.aIdx] : this.aLines[ps.aIdx] ?? '';
+      const bT = slot.bIdx >= 0 ? this.bLines[slot.bIdx] : this.bLines[ps.bIdx] ?? '';
+      this.charCache.set(si, charDiff(aT, bT));
+    }
+    const d = this.charCache.get(si);
+    if (!d) { ctx.fillStyle = '#dde1ea'; ctx.textAlign = 'left'; ctx.fillText(txt, LNW + PAD, y + FS + 2); return; }
+    const marks = this.side === 'a' ? d.aM : d.bM;
+    const hl = this.side === 'a' ? 'rgba(220,53,69,.50)' : 'rgba(40,167,69,.50)';
+    ctx.textAlign = 'left';
+    let seg = '', hlM = false, sx = LNW + PAD;
+    const flush = h => {
+      if (!seg) return;
+      if (h) { const w = ctx.measureText(seg).width; ctx.fillStyle = hl; ctx.fillRect(sx, y + 2, w, LH - 4); }
+      ctx.fillStyle = '#dde1ea'; ctx.fillText(seg, sx, y + FS + 2); sx += ctx.measureText(seg).width; seg = '';
+    };
+    for (let ci = 0; ci < txt.length; ci++) { const m = marks[ci] === 1; if (m !== hlM) { flush(hlM); hlM = m; } seg += txt[ci]; }
+    flush(hlM);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// Minimap 渲染器
+// ══════════════════════════════════════════════════════════
+class Minimap {
+  constructor() {
+    this.cv = null; this.ctx = null; this.W = 0; this.H = 0;
+    this.slots = []; this.totalPx = 0;
+  }
+  mount(canvas) {
+    this.cv = canvas; this._resize();
+  }
+  setData(slots) {
+    this.slots = slots; this.totalPx = slots.length * LH; this._resize(); this.render();
+  }
+  _resize() {
+    if (!this.cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    this.W = this.cv.offsetWidth || 18;
+    this.H = this.cv.offsetHeight || 400;
+    this.cv.width = Math.floor(this.W * dpr);
+    this.cv.height = Math.floor(this.H * dpr);
+    this.cv.style.width = this.W + 'px';
+    this.cv.style.height = this.H + 'px';
+    this.ctx = this.cv.getContext('2d');
+    this.ctx.scale(dpr, dpr);
+  }
+  resize() { this._resize(); this.render(); }
+  render() {
+    const { ctx, W, H, slots } = this;
+    if (!ctx || !W || !H || !slots.length) return;
+    ctx.clearRect(0, 0, W, H);
+    const n = slots.length;
+    // Merge consecutive same-type spans → draw as rectangles
+    // Map slot index → y pixel in minimap
+    const toY = i => (i / n) * H;
+    let i = 0;
+    while (i < n) {
+      const t = slots[i].type;
+      if (t === 'eq') { i++; continue; }
+      let j = i + 1;
+      while (j < n && slots[j].type === t) j++;
+      const y1 = toY(i), y2 = Math.max(toY(j), y1 + 2);
+      if (t === 'ins') ctx.fillStyle = 'rgba(40,167,69,.85)';
+      else if (t === 'del') ctx.fillStyle = 'rgba(220,53,69,.85)';
+      else ctx.fillStyle = 'rgba(255,193,7,.85)'; // chg
+      ctx.fillRect(2, y1, W - 4, y2 - y1);
+      i = j;
+    }
+  }
+  // Returns scroll position (0..1) for a click at clientY relative to canvas
+  clickRatio(clientY) {
+    const rect = this.cv.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+  }
+  // Thumb position & height given scrollTop + viewportH + contentH
+  thumbStyle(scrollTop, viewH, contentH) {
+    if (!this.H || contentH <= viewH) return { top: '0px', height: '100%' };
+    const ratio = viewH / contentH;
+    const thumbH = Math.max(20, this.H * ratio);
+    const maxTop = this.H - thumbH;
+    const top = (scrollTop / (contentH - viewH)) * maxTop;
+    return { top: Math.round(top) + 'px', height: Math.round(thumbH) + 'px' };
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// Vue App
+// ══════════════════════════════════════════════════════════
+const App = defineComponent({
+  setup() {
+    const phase = ref('upload'), loading = ref(false), loadMsg = ref('正在计算差异…');
+    const wasmStatus = ref('loading');
+    const algorithm = ref('myers');
+    const fA = reactive({ name: '', text: '', loaded: false, over: false });
+    const fB = reactive({ name: '', text: '', loaded: false, over: false });
+    const inA = ref(null), inB = ref(null);
+    let aLines = [], bLines = [], slots = [];
+    const stats = reactive({ add: 0, del: 0, chg: 0, eq: 0 });
+    const cvA = ref(null), cvB = ref(null), scA = ref(null), scB = ref(null);
+    const cvMini = ref(null), miniEl = ref(null);
+    let rA = new Renderer('a'), rB = new Renderer('b'), minimap = new Minimap();
+    let lock = false;
+    const searchQ = ref(''), searchInfo = ref('');
+    let sTimer = null, matchSlots = new Set();
+    const chunks = ref([]), ci = ref(-1);
+    // Minimap thumb style
+    const thumbStyle = reactive({ top: '0px', height: '40px' });
+    const nf = () => new Promise(r => requestAnimationFrame(r));
+    const canGo = computed(() => fA.loaded && fB.loaded);
+
+    loadWasm().then(() => { wasmStatus.value = wasmReady ? 'ready' : 'fallback'; });
+
+    async function readF(f) { if (f.size > MAXB) { alert('文件超过 100 MB'); return null; } return f.text(); }
+
+    function dz(st, iref) {
+      return {
+        ov(e) { e.preventDefault(); st.over = true; },
+        ol() { st.over = false; },
+        async drop(e) { e.preventDefault(); st.over = false; const f = e.dataTransfer?.files[0]; if (!f) return; const t = await readF(f); if (t !== null) { st.text = t; st.name = f.name; st.loaded = true; } },
+        clk() { iref.value?.click(); },
+        async chg(e) { const f = e.target.files[0]; if (!f) return; const t = await readF(f); if (t !== null) { st.text = t; st.name = f.name; st.loaded = true; } e.target.value = ''; },
+      };
+    }
+    const dA = dz(fA, inA), dB = dz(fB, inB);
+
+    async function onPaste(e) {
+      if (phase.value !== 'upload') return;
+      const t = e.clipboardData?.getData('text'); if (!t) return;
+      if (!fA.loaded) { fA.text = t; fA.name = '粘贴文本（左）'; fA.loaded = true; }
+      else if (!fB.loaded) { fB.text = t; fB.name = '粘贴文本（右）'; fB.loaded = true; }
+    }
+
+    function updateThumb() {
+      if (!scA.value || !minimap.H) return;
+      const sc = scA.value;
+      const s = minimap.thumbStyle(sc.scrollTop, sc.clientHeight, sc.scrollHeight);
+      thumbStyle.top = s.top; thumbStyle.height = s.height;
+    }
+
+    async function run() {
+      loading.value = true;
+      loadMsg.value = wasmReady ? `⚡ WASM (${algorithm.value}) 计算差异…` : '正在拆分行…';
+      await nf();
+
+      aLines = fA.text.split('\n'); bLines = fB.text.split('\n');
+      if (aLines[aLines.length - 1] === '') aLines.pop();
+      if (bLines[bLines.length - 1] === '') bLines.pop();
+
+      let ops;
+      try { ops = await runDiff(aLines, bLines, algorithm.value); }
+      catch (e) { loading.value = false; alert('Diff 出错：' + e.message); return; }
+
+      loadMsg.value = '正在构建视图…'; await nf();
+      slots = buildSlots(ops);
+
+      let add = 0, del = 0, chg = 0, eq = 0;
+      for (const s of slots) {
+        if (s.type === 'ins') add++;
+        else if (s.type === 'del') del++;
+        else if (s.type === 'chg' && s.aIdx >= 0) chg++;
+        else if (s.type === 'eq') eq++;
+      }
+      Object.assign(stats, { add, del, chg, eq });
+
+      const ch = []; let inC = false;
+      for (let i = 0; i < slots.length; i++) {
+        if (slots[i].type !== 'eq') { if (!inC) { ch.push(i); inC = true; } } else inC = false;
+      }
+      chunks.value = ch; ci.value = 0;
+
+      loadMsg.value = '正在渲染…';
+      phase.value = 'diff';
+      await nextTick(); await nf(); await nf();
+
+      rA.mount(cvA.value, scA.value); rB.mount(cvB.value, scB.value);
+      rA.setData(slots, aLines, bLines); rB.setData(slots, aLines, bLines);
+      rA.render(0); rB.render(0);
+
+      // Minimap
+      minimap.mount(cvMini.value);
+      minimap.setData(slots);
+      updateThumb();
+
+      if (ch.length) scrollTo(ch[0]);
+      loading.value = false;
+    }
+
+    function scrollTo(ri) {
+      if (!scA.value) return;
+      const t = Math.max(0, ri * LH - 80);
+      scA.value.scrollTop = t; scB.value.scrollTop = t;
+      rA.render(t); rB.render(t); updateThumb();
+    }
+    function onSA() {
+      if (lock) return; lock = true;
+      const t = scA.value.scrollTop;
+      scB.value.scrollTop = t; rA.render(t); rB.render(t); updateThumb(); lock = false;
+    }
+    function onSB() {
+      if (lock) return; lock = true;
+      const t = scB.value.scrollTop;
+      scA.value.scrollTop = t; rA.render(t); rB.render(t); updateThumb(); lock = false;
+    }
+    function onResize() {
+      rA.resize(); rB.resize();
+      minimap.resize();
+      if (scA.value) { rA.render(scA.value.scrollTop); rB.render(scB.value.scrollTop); }
+      updateThumb();
+    }
+
+    // Minimap click → jump
+    function onMinimapClick(e) {
+      if (!slots.length || !scA.value) return;
+      const ratio = minimap.clickRatio(e.clientY);
+      const contentH = slots.length * LH;
+      const viewH = scA.value.clientHeight;
+      const t = Math.max(0, Math.min(contentH - viewH, ratio * contentH - viewH / 2));
+      scA.value.scrollTop = t; scB.value.scrollTop = t;
+      rA.render(t); rB.render(t); updateThumb();
+    }
+
+    watch(searchQ, () => { clearTimeout(sTimer); sTimer = setTimeout(doSearch, 250); });
+    function doSearch() {
+      matchSlots.clear();
+      const q = searchQ.value.trim().toLowerCase();
+      if (!q || !slots.length) { searchInfo.value = ''; apply(); return; }
+      let cnt = 0;
+      for (let i = 0; i < slots.length && cnt < 10000; i++) {
+        const s = slots[i];
+        const at = s.aIdx >= 0 ? aLines[s.aIdx] : '';
+        const bt = s.bIdx >= 0 ? bLines[s.bIdx] : '';
+        if (at.toLowerCase().includes(q) || bt.toLowerCase().includes(q)) { matchSlots.add(i); cnt++; }
+      }
+      searchInfo.value = cnt >= 10000 ? '10000+件' : `${cnt} 处`;
+      if (cnt) scrollTo([...matchSlots][0]);
+      apply();
+    }
+    function apply() {
+      rA.matchSlots = matchSlots; rB.matchSlots = matchSlots;
+      if (scA.value) { rA.render(scA.value.scrollTop); rB.render(scB.value.scrollTop); }
+    }
+    function prev() { if (!chunks.value.length) return; ci.value = (ci.value - 1 + chunks.value.length) % chunks.value.length; scrollTo(chunks.value[ci.value]); }
+    function next() { if (!chunks.value.length) return; ci.value = (ci.value + 1) % chunks.value.length; scrollTo(chunks.value[ci.value]); }
+    function back() {
+      phase.value = 'upload';
+      Object.assign(fA, { loaded: false, text: '', name: '' });
+      Object.assign(fB, { loaded: false, text: '', name: '' });
+      slots = []; aLines = []; bLines = []; matchSlots.clear(); searchQ.value = ''; searchInfo.value = '';
+      rA = new Renderer('a'); rB = new Renderer('b'); minimap = new Minimap();
+    }
+
+    onMounted(() => { window.addEventListener('resize', onResize); document.addEventListener('paste', onPaste); });
+    onUnmounted(() => { window.removeEventListener('resize', onResize); document.removeEventListener('paste', onPaste); });
+
+    return {
+      phase, loading, loadMsg, wasmStatus, algorithm, fA, fB, inA, inB, dA, dB, stats, chunks, ci, canGo,
+      cvA, cvB, scA, scB, cvMini, miniEl, thumbStyle,
+      run, onSA, onSB, searchQ, searchInfo, back, prev, next, onMinimapClick,
+    };
+  },
+
+  template: `
+    <div v-if="loading" style="position:fixed;inset:0;background:rgba(26,29,35,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:999;font-size:15px;color:var(--muted)">
+      <div class="spin"></div>
+      <span>{{ loadMsg }}</span>
+    </div>
+
+    <div class="wasm-badge" v-if="phase==='upload'">
+      {{ wasmStatus==='loading'?'WASM 加载中…':wasmStatus==='ready'?'⚡ WASM 就绪':'JS 回退模式' }}
+    </div>
+
+    <template v-if="phase==='upload'">
+      <div class="utb">
+        <select v-model="algorithm" class="algsel" title="diff 算法">
+          <option value="myers">Myers（推荐）</option>
+          <option value="histogram">Histogram</option>
+        </select>
+        <button class="cbtn" :disabled="!canGo" @click="run">{{ canGo?'开始比较 →':'请先加载两个文件' }}</button>
+        <span class="uhint">{{ fA.loaded&&fB.loaded?'':fA.loaded?'✔ 左侧就绪，请加载右侧':fB.loaded?'✔ 右侧就绪，请加载左侧':'拖入文件或粘贴文本（Ctrl+V）' }}</span>
+      </div>
+      <div class="uscreen">
+        <div class="upanel">
+          <div class="plabel">原始文本（左）</div>
+          <div class="dz" :class="{over:fA.over,ok:fA.loaded}" @dragover="dA.ov" @dragleave="dA.ol" @drop="dA.drop" @click="dA.clk">
+            <svg v-if="!fA.loaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4m0 0L8 8m4-4 4 4M4 20h16"/></svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="#28a745" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+            <p v-if="!fA.loaded">拖入文件 / 粘贴文本 (Ctrl+V)</p>
+            <p v-else class="lname">✔ {{ fA.name }}</p>
+            <p class="hint">支持 .txt .log .csv .json .xml .md，最大 100 MB</p>
+            <input ref="inA" type="file" accept=".txt,.log,.csv,.json,.xml,.md" style="display:none" @change="dA.chg"/>
+          </div>
+        </div>
+        <div class="upanel">
+          <div class="plabel">修改文本（右）</div>
+          <div class="dz" :class="{over:fB.over,ok:fB.loaded}" @dragover="dB.ov" @dragleave="dB.ol" @drop="dB.drop" @click="dB.clk">
+            <svg v-if="!fB.loaded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4m0 0L8 8m4-4 4 4M4 20h16"/></svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="#28a745" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+            <p v-if="!fB.loaded">拖入文件 / 粘贴文本 (Ctrl+V)</p>
+            <p v-else class="lname">✔ {{ fB.name }}</p>
+            <p class="hint">支持 .txt .log .csv .json .xml .md，最大 100 MB</p>
+            <input ref="inB" type="file" accept=".txt,.log,.csv,.json,.xml,.md" style="display:none" @change="dB.chg"/>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template v-if="phase==='diff'">
+      <div class="tb">
+        <button @click="back">← 返回</button>
+        <button @click="prev">↑ 上一处</button>
+        <button @click="next">↓ 下一处</button>
+        <span style="font-size:11px;color:var(--muted)">{{ ci+1 }} / {{ chunks.length }}</span>
+        <input v-model="searchQ" class="si" type="text" placeholder="搜索…" spellcheck="false"/>
+        <span class="sinfo">{{ searchInfo }}</span>
+        <div class="stats">
+          <span class="sa">+{{ stats.add }} 新增</span>
+          <span class="sd">−{{ stats.del }} 删除</span>
+          <span class="sc">~ {{ stats.chg }} 修改</span>
+          <span>= {{ stats.eq }} 未变</span>
+        </div>
+      </div>
+      <div class="ds">
+        <!-- 垂直缩略图指示条 -->
+        <div ref="miniEl" class="minimap" @click="onMinimapClick">
+          <canvas ref="cvMini"></canvas>
+          <div class="minimap-thumb" :style="thumbStyle"></div>
+        </div>
+        <!-- 两列 diff 面板 -->
+        <div class="ds-panels">
+          <div class="dp">
+            <div class="ph">{{ fA.name }}</div>
+            <div ref="scA" class="ps" @scroll="onSA"><canvas ref="cvA"></canvas></div>
+          </div>
+          <div class="dp">
+            <div class="ph">{{ fB.name }}</div>
+            <div ref="scB" class="ps" @scroll="onSB"><canvas ref="cvB"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </template>
+  `
+});
+createApp(App).mount('#app');
+</script>
+</body>
+</html>

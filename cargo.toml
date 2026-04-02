@@ -1,0 +1,49 @@
+[package]
+name    = "large-text-diff"
+version = "0.1.0"
+edition = "2021"
+
+# wasm-pack 要求 crate-type 包含 cdylib
+[lib]
+crate-type = ["cdylib", "rlib"]   # rlib 保留，用于 cargo test
+
+[dependencies]
+# diff 核心
+imara-diff = "0.1"
+
+# WASM 绑定
+wasm-bindgen = "0.2"
+
+# JSON 序列化
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 恐慌时打印到浏览器控制台
+console_error_panic_hook = "0.1"
+
+# wasm_version() 中使用的编译期时间戳（可选，删掉则去掉 wasm_version 函数里的 chrono 调用）
+chrono = { version = "0.4", features = ["wasmbind"] }
+
+[dev-dependencies]
+# 单元测试用（非 WASM 环境）
+serde_json = "1"
+
+# Release 构建优化（减小 .wasm 体积）
+[profile.release]
+opt-level     = "z"   # 体积优先
+lto           = true
+codegen-units = 1
+panic         = "abort"
+strip         = true
+
+[profile.release.package."*"]
+opt-level = "z"
+
+# 禁用 wasm-pack 内置的 wasm-opt 后处理。
+# 原因：wasm-opt 版本较旧，不认识 Rust 编译器生成的
+# bulk-memory（memory.copy / memory.fill）和
+# nontrapping-fptoint（i64.trunc_sat_f64_s）指令，
+# 导致 "all used features should be allowed" 验证失败。
+# 禁用后由 Rust 自身的 release 优化保证体积。
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
