@@ -1,0 +1,20 @@
+name: Package the wasm application
+on: push
+permissions:
+    contents: write
+jobs: 
+    build:
+        name: Build
+        runs-on: ubuntu-latest
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v4
+            -   name: Install wasm tool
+                run: cargo install wasm-pack
+            -   name: Build wasm lib
+                run: wasm-pack build --target web --release
+            -   name: Deploy
+                run: JamesIves/github-pages-deploy-action@v4
+                with:
+                    branch: gh-pages
+                    folder: build
