@@ -1,0 +1,15 @@
+{
+  "name": "large-text-diff",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "large_text_diff_bg.wasm",
+    "large_text_diff.js",
+    "large_text_diff.d.ts"
+  ],
+  "main": "large_text_diff.js",
+  "types": "large_text_diff.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
