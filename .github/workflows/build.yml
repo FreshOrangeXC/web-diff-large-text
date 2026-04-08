@@ -18,10 +18,13 @@ jobs:
         run: cargo install wasm-pack
 
       - name: Build wasm lib to dist
-        run: wasm-pack build --target web --release --out-dir dist
+        run: wasm-pack build --target web --release --out-dir dist/pkg
 
       - name: Copy index.html to dist
         run: cp index.html dist/
+
+      - name: Remove .gitignore from dist
+        run: rm -f dist/pkg/.gitignore
 
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
