@@ -1,12 +1,12 @@
 name: Package the wasm application
 
-on: 
+on:
   push
 
 permissions:
   contents: write
 
-jobs: 
+jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -14,8 +14,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install wasm tool
-        run: cargo install wasm-pack
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build wasm lib to dist
         run: wasm-pack build --target web --release --out-dir dist/pkg
