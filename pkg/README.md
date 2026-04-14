@@ -1,2 +1,4 @@
 # web-diff-large-text
-A web app for visually comparing two portions of LARGE(up to 100mb) text./可以对比两个100mb大小的文本的网页
+A web app for visually comparing two portions of LARGE(up to 100mb) text.
+
+- Live demo at [freshorangexc.github.io/web-diff-large-text](https://freshorangexc.github.io/web-diff-large-text/) hosted on Vercel.
