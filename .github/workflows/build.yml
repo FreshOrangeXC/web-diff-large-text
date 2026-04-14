@@ -37,7 +37,7 @@ jobs:
       - name: Remove .gitignore from dist
         run: rm -f dist/pkg/.gitignore
 
-      - name: Deploy
+      - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
